@@ -11,22 +11,32 @@ import (
 
 func (app *application) storeSecret(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		app.logger.Warn("invalid request method", "method", r.Method)
+		app.clientError(w, http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Simulate parsing plaintext from the request
 	plainText := r.URL.Query().Get("secret")
 	if plainText == "" {
-		http.Error(w, "Missing secret in query parameter", http.StatusBadRequest)
+		app.logger.Warn("missing secret")
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	encryptedSecret, err := app.encryptSecret(plainText)
+	if err != nil {
+		app.logger.Error("encryption failed", "error", err)
+		app.serverError(w,r,err)
 		return
 	}
 
 
 	secretID := app.secretNumber
 	app.secretNumber++
-	app.secrets[secretID] = plainText
+	app.secrets[secretID] = encryptedSecret
 
+	app.logger.Info("secret stored succesfully", "secretID", secretID)
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]string{
 		"status": "success",
@@ -41,20 +51,29 @@ func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 
 	secretIDInt, err := strconv.Atoi(secretIDStr)
 	if err != nil {
-		http.Error(w, "Invalid secret ID", http.StatusBadRequest)
+		app.logger.Warn("missing secret's ID")
+		app.clientError(w, http.StatusBadRequest)
 		return
 	}
 
-	secret, ok := app.secrets[secretIDInt]
+	encryptedSecret, ok := app.secrets[secretIDInt]
 	if !ok {
-		http.Error(w, "Secret not found", http.StatusNotFound)
+		app.logger.Warn("secret not found", "secretID", secretIDStr)
+		app.clientError(w, http.StatusNotFound)
 		return
 	}
 
+	plainText, err := app.decryptSecret(encryptedSecret)
+	if err != nil {
+		app.logger.Error("decryption failed", "secretID", secretIDStr, "error", err)
+		app.serverError(w,r,err)
+	}
+
+	app.logger.Info("secret retrieved succesfully", "secretID", secretIDStr)
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]string{
 		"secretID": secretIDStr,
-		"secret":   secret,
+		"secret":   plainText,
 	}
 	json.NewEncoder(w).Encode(response)
 }

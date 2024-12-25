@@ -12,4 +12,4 @@ func (app *application) routes() *mux.Router {
 	r.HandleFunc("/secrets", app.storeSecret).Methods("POST")
 
 	return r
-}
+} 
