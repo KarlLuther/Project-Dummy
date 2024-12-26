@@ -2,17 +2,27 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"test.com/project/internal/models"
 )
 
 func (app *application) storeSecret(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		app.logger.Warn("invalid request method", "method", r.Method)
 		app.clientError(w, http.StatusMethodNotAllowed)
+		return
+	}
+
+	vars := mux.Vars(r)
+	name := vars["name"]
+	if name == "" {
+		app.logger.Warn("missing name in URL path")
+		app.clientError(w, http.StatusBadRequest)
 		return
 	}
 
@@ -31,10 +41,12 @@ func (app *application) storeSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
-	secretID := app.secretNumber
-	app.secretNumber++
-	app.secrets[secretID] = encryptedSecret
+	secretID, err := app.secrets.Insert(1, name, encryptedSecret, 7) 
+	if err != nil {
+		app.logger.Error("failed to store secret", "error", err)
+		app.serverError(w, r, err)
+		return
+	}
 
 	app.logger.Info("secret stored succesfully", "secretID", secretID)
 	w.Header().Set("Content-Type", "application/json")
@@ -51,22 +63,28 @@ func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 
 	secretIDInt, err := strconv.Atoi(secretIDStr)
 	if err != nil {
-		app.logger.Warn("missing secret's ID")
+		app.logger.Warn("invalid secret ID")
 		app.clientError(w, http.StatusBadRequest)
 		return
 	}
 
-	encryptedSecret, ok := app.secrets[secretIDInt]
-	if !ok {
-		app.logger.Warn("secret not found", "secretID", secretIDStr)
-		app.clientError(w, http.StatusNotFound)
+	secret, err := app.secrets.Get(secretIDInt)
+	if err != nil {
+		if errors.Is(err, models.ErrNoRecord) {
+			app.logger.Warn("secret not found", "secretID", secretIDInt)
+			app.clientError(w, http.StatusNotFound)
+		} else {
+			app.logger.Error("failed to retrieve secret", "error", err)
+			app.serverError(w, r, err)
+		}
 		return
 	}
 
-	plainText, err := app.decryptSecret(encryptedSecret)
+	plainText, err := app.decryptSecret(secret.SecretData)
 	if err != nil {
 		app.logger.Error("decryption failed", "secretID", secretIDStr, "error", err)
 		app.serverError(w,r,err)
+		return
 	}
 
 	app.logger.Info("secret retrieved succesfully", "secretID", secretIDStr)

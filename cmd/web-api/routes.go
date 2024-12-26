@@ -9,7 +9,7 @@ func (app *application) routes() *mux.Router {
 
 	r.HandleFunc("/",app.home).Methods("GET")
 	r.HandleFunc("/secrets/view/{id}", app.getSecretByID).Methods("GET")
-	r.HandleFunc("/secrets", app.storeSecret).Methods("POST")
+	r.HandleFunc("/secrets/{name}", app.storeSecret).Methods("POST")
 
 	return r
 } 
