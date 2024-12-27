@@ -8,55 +8,37 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/crypto/bcrypt"
 	"test.com/project/internal/models"
 )
 
+//storeSecret is a handler for the POST /secrets/{name} endpoint
 func (app *application) storeSecret(w http.ResponseWriter, r *http.Request) {
+	//checking that the request method is appropriate
 	if r.Method != http.MethodPost {
-		app.logger.Warn("invalid request method", "method", r.Method)
-		app.clientError(w, http.StatusMethodNotAllowed)
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	vars := mux.Vars(r)
-	name := vars["name"]
-	if name == "" {
-		app.logger.Warn("missing name in URL path")
-		app.clientError(w, http.StatusBadRequest)
-		return
-	}
-
-	// Simulate parsing plaintext from the request
-	plainText := r.URL.Query().Get("secret")
-	if plainText == "" {
-		app.logger.Warn("missing secret")
-		app.clientError(w, http.StatusBadRequest)
-		return
-	}
-
-	encryptedSecret, err := app.encryptSecret(plainText)
+	secretInstance,err := app.decodeJsonSecret(w,r)
 	if err != nil {
-		app.logger.Error("encryption failed", "error", err)
 		app.serverError(w,r,err)
 		return
 	}
 
-	secretID, err := app.secrets.Insert(1, name, encryptedSecret, 7) 
+
+	id, err := app.secrets.Insert(secretInstance.UserID, secretInstance.Name, secretInstance.SecretData, 7)
 	if err != nil {
-		app.logger.Error("failed to store secret", "error", err)
-		app.serverError(w, r, err)
+		app.serverError(w,r,err)
 		return
 	}
 
-	app.logger.Info("secret stored succesfully", "secretID", secretID)
 	w.Header().Set("Content-Type", "application/json")
-	response := map[string]string{
-		"status": "success",
-		"secretID": fmt.Sprint(secretID),
-	}
+	response := map[string]string{"status": "received", "id": fmt.Sprint(id)}
 	json.NewEncoder(w).Encode(response)
 }
 
+//getSecretByID is a handler for the GET /secrets/view/{id} endpoint
 func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	secretIDStr := vars["id"]
@@ -64,7 +46,7 @@ func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 	secretIDInt, err := strconv.Atoi(secretIDStr)
 	if err != nil {
 		app.logger.Warn("invalid secret ID")
-		app.clientError(w, http.StatusBadRequest)
+		http.Error(w, "Invalid secret ID", http.StatusBadRequest)
 		return
 	}
 
@@ -72,7 +54,7 @@ func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, models.ErrNoRecord) {
 			app.logger.Warn("secret not found", "secretID", secretIDInt)
-			app.clientError(w, http.StatusNotFound)
+			http.Error(w, "Secret not found", http.StatusNotFound)
 		} else {
 			app.logger.Error("failed to retrieve secret", "error", err)
 			app.serverError(w, r, err)
@@ -96,6 +78,79 @@ func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func (app *application) login(w http.ResponseWriter, r *http.Request) {
+	//getting credentials out of the json body
+	username, password, err := app.decodeJsonCredentials(w,r)
+	if err != nil {
+		app.serverError(w,r,err)
+		return
+	}
+
+	//checking that the user actually exists within the db
+	userID, err := app.users.Authenticate(username, password)
+	if err != nil {
+		app.clientError(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	
+	//generating a new JWT token string to send to the client
+	tokenString, err := app.generateToken(w,r ,userID) 
+	if err != nil {
+		app.serverError(w,r,err)
+		return
+	}
+
+	app.writeJSONResponse(w, http.StatusOK, map[string]string{
+		"token": tokenString,
+	})
+}
+
+func (app *application) registerNewUser(w http.ResponseWriter, r *http.Request) {
+	//getting credentials out of the json body
+	username, password, err := app.decodeJsonCredentials(w,r)
+	if err != nil {
+		app.serverError(w,r,err)
+		return
+	}
+
+	//validating the password
+	app.validatePassword(w,password)
+
+	//hashPassword returns the bcrypt hash of a plaintext password
+	//the second argument determines how strong the hash should be 
+	//- the higher it is - the slower the hashing will be but more secure
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		app.serverError(w,r,err)
+		return
+	}
+
+	userExists, err := app.users.UserExists(username)
+	if err != nil {
+		app.serverError(w,r,err)
+		return
+	}
+
+	if userExists {
+		app.clientError(w, "Username already in use", http.StatusConflict)
+		return
+	}
+
+	//create a new user and insert it into the database
+	id, err := app.users.Insert(username, hashedPassword)
+	if err != nil {
+		app.serverError(w,r,err)
+		return
+	}
+
+	app.writeJSONResponse(w, http.StatusCreated, map[string]interface{}{
+		"status": "success",
+		"data": map[string]int{"userID": id},
+		"error": nil,
+	})
+}
+
 func (app *application) home(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("hello world"))
 }
+

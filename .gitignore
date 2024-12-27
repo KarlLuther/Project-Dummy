@@ -1,2 +1,6 @@
 #Ignore enviromental variables
 .env
+#Ignore ssl files
+server.crt
+server.csr
+server.key 

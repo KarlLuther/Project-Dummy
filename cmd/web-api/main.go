@@ -10,33 +10,37 @@ import (
 	"os"
 
 	_ "github.com/go-sql-driver/mysql"
-
-	"test.com/project/internal/models"
-
 	"github.com/joho/godotenv"
+	"test.com/project/internal/models"
 )
 
 type application struct {
 	cryptoKey []byte
-	logger *slog.Logger
-	secrets *models.SecretModel
+	jwtSecret []byte
+	logger    *slog.Logger
+	secrets   *models.SecretModel
+	users     *models.UserModel
 }
 
 func main() {
-	addr := flag.String("addr", ":4000", "HTTP network address")
+	addr := flag.String("addr", ":4000", "HTTPS network address")
 	dsn := flag.String("dsn", "apiAdmin:ZyraVanya1337!@/secretstoragedb?parseTime=true", "MySQL data source name")
 	flag.Parse()
 
-	var encryptionKey string 
+	// certFile := "../../certs/server.crt"
+	// keyFile := "../../certs/server.key"
 
-	err := getDotEnv(&encryptionKey)
+	var encryptionKey string
+	var jwtSecretKey string
+
+	err := getDotEnv(&encryptionKey, &jwtSecretKey)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	if len(encryptionKey) != 32 {
-    log.Fatal("Invalid encryption key size. Must be 32 bytes.")
-	}	
+		log.Fatal("Invalid encryption key size. Must be 32 bytes.")
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 
@@ -45,23 +49,22 @@ func main() {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-
 	defer db.Close()
 
 	app := &application{
 		cryptoKey: []byte(encryptionKey),
-		logger: logger, 
-		secrets: &models.SecretModel{DB: db},
+		jwtSecret: []byte(jwtSecretKey),
+		logger:    logger,
+		secrets:   &models.SecretModel{DB: db},
+		users:     &models.UserModel{DB: db},
 	}
 
+	router := app.routes()
 
+	log.Printf("Starting HTTPS server on %s...", *addr)
+	logger.Info("starting HTTPS server", "addr", *addr)
 
-	router := app.routes() 
-
-	log.Println("Starting server on :4000...")
-	logger.Info("stating server", "addr", *addr)
-
-	err = http.ListenAndServe(*addr, router)
+	err = http.ListenAndServeTLS(*addr, certFile, keyFile, router)
 	if err != nil {
 		logger.Error("failed to start server", "error", err)
 		os.Exit(1)
@@ -71,12 +74,9 @@ func main() {
 func openDB(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
 
-	//we don't actually create any connections with line 59, they are created
-	//when needed, so we do a ping on the db in order to check that the connection 
-	//will work. if there is an error we will close the connection pull and return the error
 	err = db.Ping()
 	if err != nil {
 		db.Close()
@@ -86,7 +86,7 @@ func openDB(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-func getDotEnv(encryptionKey *string) error{
+func getDotEnv(encryptionKey *string, jwtSecretKey *string) error {
 	err := godotenv.Load()
 	if err != nil {
 		return fmt.Errorf("error loading .env file: %w", err)
@@ -97,5 +97,10 @@ func getDotEnv(encryptionKey *string) error{
 		return fmt.Errorf("ENCRYPTION_KEY not set in environment")
 	}
 
+	*jwtSecretKey = os.Getenv("JWT_SECRET")
+	if *jwtSecretKey == "" {
+		return fmt.Errorf("JWT_SECRET_KEY not set in environment")
+	}
+
 	return nil
-} 
+}
