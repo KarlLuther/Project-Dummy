@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,10 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"test.com/project/internal/models"
 )
+
+type contextKey string
+
+const userIDKey contextKey = "userID"
 
 func (app *application) serverError(w http.ResponseWriter, r *http.Request, err error) {
 	var (
@@ -155,12 +160,20 @@ func (app *application) validatePassword(w http.ResponseWriter, password string)
 
 func (app *application) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			app.clientError(w, "Missing authorization header", http.StatusUnauthorized)
+		// Skip authentication for specific paths
+		if r.URL.Path == "/register" || r.URL.Path == "/login" {
+			next.ServeHTTP(w, r)
 			return
 		}
 
+		// Check for Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" || len(authHeader) < len("Bearer ")+1 || authHeader[:7] != "Bearer " {
+			app.clientError(w, "Missing or improperly formatted authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract the token and validate it
 		tokenString := authHeader[len("Bearer "):]
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -172,8 +185,30 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 		if err != nil || !token.Valid {
 			app.clientError(w, "Invalid token", http.StatusUnauthorized)
 			return
-		}	
+		}
 
-		next.ServeHTTP(w, r)
+		// Extract userID from claims
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			app.clientError(w, "Invalid token claims", http.StatusUnauthorized)
+			return
+		}
+
+		userIDValue, ok := claims["user_id"]
+		if !ok {
+			app.clientError(w, "Missing userID in token claims", http.StatusUnauthorized)
+			return
+		}
+
+		userIDFloat, ok := userIDValue.(float64)
+		if !ok {
+			app.clientError(w, "Invalid userID format in token claims", http.StatusUnauthorized)
+			return
+		}
+
+		// Add userID to context and call next handler
+		userID := int(userIDFloat)
+		ctx := context.WithValue(r.Context(), userIDKey, userID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

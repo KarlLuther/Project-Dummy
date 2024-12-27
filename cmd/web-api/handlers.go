@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,9 +32,10 @@ func (app *application) storeSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	response := map[string]string{"status": "received", "id": fmt.Sprint(id)}
-	json.NewEncoder(w).Encode(response)
+	app.writeJSONResponse(w, http.StatusOK, map[string]string{
+    "status": "received",
+    "id":     fmt.Sprint(id),
+})
 }
 
 //getSecretByID is a handler for the GET /secrets/view/{id} endpoint
@@ -50,7 +50,14 @@ func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret, err := app.secrets.Get(secretIDInt)
+	userID, ok := r.Context().Value(userIDKey).(int)
+	if !ok {
+		app.clientError(w, "Unauthorized access", http.StatusUnauthorized)
+		return
+	}
+
+
+	secret, err := app.secrets.Get(secretIDInt,userID)
 	if err != nil {
 		if errors.Is(err, models.ErrNoRecord) {
 			app.logger.Warn("secret not found", "secretID", secretIDInt)
@@ -70,12 +77,11 @@ func (app *application) getSecretByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.logger.Info("secret retrieved succesfully", "secretID", secretIDStr)
-	w.Header().Set("Content-Type", "application/json")
-	response := map[string]string{
-		"secretID": secretIDStr,
-		"secret":   plainText,
-	}
-	json.NewEncoder(w).Encode(response)
+	app.writeJSONResponse(w, http.StatusOK, map[string]string{
+    "status": "success",
+    "secretID": secretIDStr,
+    "secret":   plainText,
+})
 }
 
 func (app *application) login(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +107,9 @@ func (app *application) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.writeJSONResponse(w, http.StatusOK, map[string]string{
-		"token": tokenString,
-	})
+    "status": "success",
+    "token":  tokenString,
+})
 }
 
 func (app *application) registerNewUser(w http.ResponseWriter, r *http.Request) {
@@ -144,10 +151,9 @@ func (app *application) registerNewUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	app.writeJSONResponse(w, http.StatusCreated, map[string]interface{}{
-		"status": "success",
-		"data": map[string]int{"userID": id},
-		"error": nil,
-	})
+    "status": "success",
+    "data":   map[string]int{"userID": id},
+})
 }
 
 func (app *application) home(w http.ResponseWriter, _ *http.Request) {

@@ -41,11 +41,11 @@ func (m *SecretModel) Insert(user_id int, name string, secret_data []byte, expir
 }
 
 
-func (m *SecretModel) Get(id int) (Secret, error) {
+func (m *SecretModel) Get(id int, userID int) (Secret, error) {
 	stmt := `SELECT id, user_id,  name, secret_data, created, expires FROM secrets
-	WHERE expires > UTC_TIMESTAMP() AND id = ?`
+	WHERE id = ? AND user_id = ? AND expires > UTC_TIMESTAMP()`
 
-	row := m.DB.QueryRow(stmt,id)
+	row := m.DB.QueryRow(stmt,id,userID)
 
 	var secret Secret
 

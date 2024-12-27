@@ -27,9 +27,6 @@ func main() {
 	dsn := flag.String("dsn", "apiAdmin:ZyraVanya1337!@/secretstoragedb?parseTime=true", "MySQL data source name")
 	flag.Parse()
 
-	// certFile := "../../certs/server.crt"
-	// keyFile := "../../certs/server.key"
-
 	var encryptionKey string
 	var jwtSecretKey string
 
@@ -40,6 +37,10 @@ func main() {
 
 	if len(encryptionKey) != 32 {
 		log.Fatal("Invalid encryption key size. Must be 32 bytes.")
+	}
+
+	if len(jwtSecretKey) != 512 {
+		log.Fatal("Invalid JWT secret key size. Must be 512 bytes.")
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
@@ -61,10 +62,10 @@ func main() {
 
 	router := app.routes()
 
-	log.Printf("Starting HTTPS server on %s...", *addr)
-	logger.Info("starting HTTPS server", "addr", *addr)
+	log.Printf("Starting HTTP server on %s...", *addr)
+	logger.Info("starting HTTP server", "addr", *addr)
 
-	err = http.ListenAndServeTLS(*addr, certFile, keyFile, router)
+	err = http.ListenAndServe(*addr, router)
 	if err != nil {
 		logger.Error("failed to start server", "error", err)
 		os.Exit(1)
@@ -77,6 +78,9 @@ func openDB(dsn string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	//we don't actually create any connections with line 59, they are created
+	//when needed, so we do a ping on the db in order to check that the connection 
+	//will work. if there is an error we will close the connection pull and return the error
 	err = db.Ping()
 	if err != nil {
 		db.Close()

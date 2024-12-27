@@ -65,11 +65,16 @@ func (m *UserModel) Insert(username string, passwordHash []byte) (int, error) {
 func (m *UserModel) UserExists(username string) (bool, error) {
 	stmt := `SELECT id FROM users WHERE username = ?`
 
-	var count int
-	err := m.DB.QueryRow(stmt, username).Scan(&count)
+	var id int
+	err := m.DB.QueryRow(stmt, username).Scan(&id)
 	if err != nil {
-		return false, err
+		if errors.Is(err, sql.ErrNoRows) {
+			// Username does not exist
+			return false, nil
+		}
+		return false, err // Other database errors
 	}
 
-	return true, nil 
+	// Username exists
+	return true, nil
 }

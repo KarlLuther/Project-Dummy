@@ -10,7 +10,7 @@ func (app *application) routes() *mux.Router {
 	r.HandleFunc("/",app.home).Methods("GET")
 	r.HandleFunc("/secrets/view/{id}", app.getSecretByID).Methods("GET")
 	r.HandleFunc("/secrets/post", app.storeSecret).Methods("POST")
-	r.HandleFunc("/resister", app.registerNewUser).Methods("POST")
+	r.HandleFunc("/register", app.registerNewUser).Methods("POST")
 	r.HandleFunc("/login", app.login).Methods("POST")
 	r.Use(app.authenticate)
 
